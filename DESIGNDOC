@@ -1,0 +1,231 @@
+			+--------------------+
+			|        CS 140        |
+			|  PROJECT 1: THREADS  |
+			|     DESIGN DOCUMENT  |
+			+--------------------+
+				   
+---- GROUP ----
+10132510125 – 龚月云<redeyeflight@outlook.com>
+10121540104 – 孙诗韵
+10132510150 – 胡豪杰
+
+
+			     ALARM CLOCK
+			     ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+-	In thread.h, added variable to thread struct:
+int64_t block_ticks; 
+/* Record the time the thread has been blocked. */
+
+-	In thread.c, added function
+Void block_check(struct thread *t,void  *aux UNUSED);
+/* Decrease the value of block_ticks by 1,
+Wake up the thread when block_ticks=0. */
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer_interrupt() call;
+>> including the effects of the thread_create() call which has also been modified;
+
+In timer_sleep():
+1)	Check for valid ticks argument (ticks > 0).
+2)	Set the interrupt status to OFF and store former status into old_level;
+3)	Set the value of current thread’s block_tick with ticks;
+4)	Block the thread;
+5)	Restore the interrupt status with old_level;
+
+In timer_interrupt():
+1)	Add ticks by 1
+2)	For each thread, function block_check() will be execute once
+
+In block_check():
+1)	If the thread has been blocked and its block_ticks>0,
+2)	Decrease block_ticks by 1,
+3)	Unblock the thread when block_ticks=0
+
+---- SYNCHRONIZATION ----
+
+---- RATIONALE ----
+
+>> Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+-	Before we modified the busy waiting, in timer_sleep(), the thread just did the yield and put itself into ready list, which wasted quite a lot of cpu resourse, so we choose this design, do the block_check every time when timer interrupt happens, and wake sleeping thread up when its block_ticks decreased to 0.
+
+			 PRIORITY SCHEDULING
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+-	In thread.h, the following variables are added to the thread struct:
+int old_priority; /* Old priority. */
+struct list locks;/* The lock the thread is holding. */
+struct lock *lock_waiting;/* The lock the thread is waiting for. */
+
+-	In synch.h, the following variables are added to the thread lock:
+Struct list_elem elem; /* List element for priority donation. */
+Int max_priority; /* Max priority among the threads acquiring the lock. */
+
+-	In thread.c, the following functions are added:
+bool thread_pri_less (struct list_elem *elem1, struct list_elem *elem2, void *aux UNUSED);
+/* priority compare function. */
+Void thread_hold_the_lock(struct lock *lock);
+/* Let thread hold a lock */
+Void thread_donate_priority (struct thread *t);
+/* Donate current priority to thread t. */
+Void thread_remove_lock(struct lock *lock);
+/* Remove a lock from thread’s locks list. */
+Void thread_update_priority(struct thread *t);
+/* update thread’s priority after changed. */
+
+-	In synch.c, the following functions are added:
+Bool lock_pri_less(struct list_elem *elem1, struct list_elem *elem2, void *aux UNUSED);
+/* priority compare function for locks*/
+Bool cond_pri_less (const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED);
+/* priority compare function for conditions*/
+
+---- ALGORITHMS ----
+
+In thread_donate_priority():
+1)	Modify the priority of the thread,
+2)	Reinsert this thread into ready list after changing its priority
+
+In thread_remove_lock():
+1)	Remove a lock from thread’s locks list,
+2)	Update the priority list of the thread,
+
+In thread_update_priority():
+1)	Reinsert the thread into ready list.
+
+In thread_unblock():
+1)	Change the status of the blocked thread into READY,
+2)	Insert the thread into ready list in order
+
+In thread_yield():
+1)	Change the status of the running thread into READY,
+2)	Insert the thread into ready list orderly
+
+In init_thread():
+1)	Initialize the attributes of thread,
+2)	Set thread’s old priority with argument priority,
+3)	Initialize the lock list,
+4)	Initialize thread’s lock waiting list as null,
+5)	Insert the thread into ready list orderly
+
+In thread_set_priority():
+1)	Set the priority of current thread with argument new_priority,
+2)	Yield current thread to reinsert it into the ready list.
+
+In thread_create():
+1)	If the current thread has been blocked,
+2)	Yield this thread.
+
+In lock_release():
+1)	Remove lock from thread holding locks list.
+
+In lock_acquire():
+1)	The realization of priority donation before semaphore action,
+2)	Get the hold of the lock after being wake up
+
+In cond_signal():
+In sema_up():
+In sema_down():
+1)	Modify the waiting list into priority ordered list.
+
+---- SYNCHRONIZATION ----
+
+---- RATIONALE ----
+
+>> Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+Because there are lots of list struct in thread.c, it’s convenient to keep those lists as priority ordered list. To do this we added some priority compare functions into thread.c and synch.c to get right result.
+We also added some attributes into the codes to achieve the goal, for instance the locks list ,the lock_waiting list, and modified related function to get better result.
+
+			  ADVANCED SCHEDULER
+			  ==================
+
+---- DATA STRUCTURES ----
+
+>> Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+-	In thread.h, the following variables are added to the thread struct:
+int nice;
+/* The thread's current nice value. */
+Fixed_t recent_cpu;
+/* The thread's most recently calculated recent_cpu value. */
+
+-	In thread.c, the following global variable is added:
+int load_avg;
+/* The system's most recently calculated load average value. */
+
+---- ALGORITHMS ----
+In timer_interrupt():
+1)	Update the value of load_avg of system and value of recent_cpu of ALL thread every TIMER_FREQ time,
+2)	Update the thread’s priority every 4 timer_ticks() call,
+
+In thread_mlfqs_increase_recent_cpu_by_one():
+1)	Increase the value of recent_cpu of thread by 1 for every thread which is not idle,
+
+In thread_mlfqs_update_load_avg_and_recent_cpu():
+1)	Every per second to refresh load_avg and recent_cpu of ALL threads.
+
+In thread_mlfqs_update_priority():
+1)	Update priority of ALL threads.
+
+---- RATIONALE ----
+
+>> Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices.  If you were to have extra
+>> time to work on this part of the project, how might you choose to
+>> refine or improve your design?
+
+Advantages:
+- Simple to understand.
+- Minimal adding of extra variables, kernel threads remain relatively
+small. Also makes for easier readability.
+-No busy waiting which wastes quiet a number of cpu resource.
+-Decrease waiting time of the operating system.
+
+Disadvantages:
+- Performance suffers due to turning off interrupts instead of locking
+variables.
+- Ordered inserting and sorting lists takes O(n) and O(n log n)
+respectively. Using binary tree / other more efficient data structures
+may be needed. (Also, bad caching in linked lists)
+
+To refine my design, I would implement the following features:
+- Automatic deadlock detection
+
+This is equivalent to finding cycles in the lock donation graph, which is
+iterated through in the thread_donate_priority function. A maximum iteration
+depth of 8 is set in case there is a deadlock cycle (without a depth
+parameter, this would cause an infinite loop).
+
+What would be optimal is to detect deadlock cycles and lower all the
+deadlocked threads priorities to PRI_MIN / kill the threads.
+
+- Detect overflows in fix_point.h
+
+The values for priorities and nice are clamped, but the values for
+recent_cpu and load_avg are not. Hence, this leaves the possibility for
+overflow, which I currently do not check for. To be correct, the OS needs
+to check for this.
+
+I implemented fix-point math in a header file. The conversions between
+integers and fixed-point and arithmetic was abstracted away in this
+file. I used the standard functions as described in the Pintos
+documentation and called these functions in my mlqfs calculation functions
+in thread.c. Abstracting the fixed-point functions allowed for better
+readability when calculating the mlqfs thread.c functions.
