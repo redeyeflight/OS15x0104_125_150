@@ -1,3 +1,5 @@
+/* 此文件所有中文注释由陈希文所写 */
+
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -17,6 +19,10 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+//* My addition *//
+#include "threads/malloc.h"
+#include "userprog/syscall.h"
+//* My addition *//
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -28,21 +34,71 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  char *fn_copy; /* file_name的copy */
   tid_t tid;
 
+  //* My Implementation *//
+  char *save;
+  char *fn;/* 存放真正的文件名 */
+  
+  struct thread *t;
+  
+  tid = TID_ERROR;
+  //* My Implementation *//
+  
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
+  fn_copy = palloc_get_page (0); /* 调用palloc_get_page为文件的备份分配一个页 */
   if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
-
+    return TID_ERROR;/* 如果分配页失败返回错误信息 */
+  strlcpy (fn_copy, file_name, PGSIZE);/* 将文件复制给文件备份，PGSIZE是为了确保复制完全 */
+  
+  //* My Implementation *//
+  fn = malloc (strlen (file_name) + 1);/* 调用malloc为fn分配等于file_name所占存储单元长度大小的内存 */
+  if (!fn)/* 如果分配失败，释放当前已经给出的资源 */
+  {
+	  free (fn);
+	  if (tid == TID_ERROR)
+	  palloc_free_page (fn_copy); 
+	  return tid;
+	  }
+  memcpy (fn, file_name, strlen (file_name) + 1);/* 将file_name复制给fn */
+  file_name = strtok_r (fn, " ", &save);/* fn经过一次strtok_r只保留真正的文件名 */
+  //* My Implementation *//
+  
   /* Create a new thread to execute FILE_NAME. */
+  /* Old implementation
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
-  return tid;
+  return tid;*/
+  
+  //* My Implementation *//
+  tid = thread_create (fn, PRI_DEFAULT, start_process, fn_copy);/* 创建一个线程来执行该文件 */
+  if (tid == TID_ERROR)/* 如果分配失败，释放当前已经给出的资源 */
+  {
+	  free (fn);
+	  if (tid == TID_ERROR)
+	  palloc_free_page (fn_copy); 
+	  return tid;
+	  }
+	  
+  t = get_thread_by_tid (tid);/* 通过tid得到指向对应线程的指针，该函数在thread.c中定义 */
+  sema_down (&t->wait);/* 请求能够对当前线程操作 */
+  if (t->ret_status == -1)
+    tid = TID_ERROR;
+  while (t->status == THREAD_BLOCKED)
+    thread_unblock (t);
+  if (t->ret_status == -1)
+    process_wait (/*t->*/tid);/* 等待该线程执行完成 */
+    
+    /* 线程执行完成，释放资源并返回它的tid */
+    free (fn);
+    if (tid == TID_ERROR)
+    palloc_free_page (fn_copy); 
+    return tid;
+  //* My Implementation *//
 }
 
 /* A thread function that loads a user process and starts it
@@ -54,17 +110,92 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  //* My Implementation *//
+  char *token, *save_ptr;
+  void *start;
+  int argc, i;/* argc:参数个数 */
+  int *argv_off; /* 记录每个参数距离文件名首地址的长度 */
+  size_t file_name_len;
+  struct thread *t;
+  //* My Implementation *//
+  
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  
+  //* My Implementation *//
+  t = thread_current ();
+  argc = 0;
+  argv_off = malloc (32 * sizeof (int));/* 最长128字节 */
+  if (!argv_off)
+    goto exit;
+  file_name_len = strlen (file_name);
+  argv_off[0] = 0;/* 参数个数从1开始 */
+  for (
+       token = strtok_r (file_name, " ", &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr)
+       )
+        {
+          while (*(save_ptr) == ' ')/* 处理多个空格的情况 */
+            ++save_ptr;
+            /* 将当前参数距离文件名首地址的长度保存 */
+          argv_off[++argc] = save_ptr - file_name;
+        }
+  //* My Implementation *//
+  
+  /* 加载名为file_name的可执行文件到当前线程。 */
+  /* 文件的入口存入if_.eip，栈指针存入if_.esp */
   success = load (file_name, &if_.eip, &if_.esp);
 
+  //* My Implementation *//
+  /* 将参数压入栈中 */
+  if (success)
+    {
+		/* 打开该可执行文件并设置为当前线程的映像文件 */
+      t->self = filesys_open (file_name); 
+       /* 从现在开始拒绝其他线程向这个文件执行写操作 */
+      file_deny_write (t->self); 
+      /* 因为现在if_esp指向栈顶，我们要为参数的压栈
+       * 预留出空间，所以把if_esp倒退总参数长度个单位*/
+      if_.esp -= file_name_len + 1;
+      start = if_.esp;
+      /* 把参数复制给if_esp */
+      memcpy (if_.esp, file_name, file_name_len + 1);
+      if_.esp -= 4 - (file_name_len + 1) % 4; /* 对齐 */
+      if_.esp -= 4;
+      *(int *)(if_.esp) = 0; /* argv[argc] == 0 */
+      /* 把参数的地址依次压栈 */
+      for (i = argc - 1; i >= 0; --i)
+        {
+          if_.esp -= 4;
+          *(void **)(if_.esp) = start + argv_off[i]; 
+        }
+
+      if_.esp -= 4;
+      *(char **)(if_.esp) = (if_.esp + 4); /* 将argv首地址压栈 */
+      if_.esp -= 4;
+      *(int *)(if_.esp) = argc; /* 将argc压栈 */
+      if_.esp -= 4;
+      *(int *)(if_.esp) = 0; /* 假返回地址 */     
+      sema_up (&t->wait);intr_disable ();
+      thread_block ();intr_enable ();
+    }
+  else
+    {
+      free (argv_off);
+exit:
+      t->ret_status = -1;sema_up (&t->wait);
+      intr_disable ();thread_block ();
+      intr_enable ();thread_exit ();
+    } 
+  free (argv_off);
+  //* My Implementation *// 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  /* Old implementation if (!success) thread_exit ();*/
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -87,8 +218,28 @@ start_process (void *file_name_)
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
-{
-  return -1;
+{	/* Old implementation 
+  return -1;*/ 
+  //* My Implementation *//
+  struct thread *t;
+  int ret;
+ 
+  t = get_thread_by_tid (child_tid);
+  /* 如果出现了上面描述中出现的几种情况马上返回-1 */
+  if (!t || t->status == THREAD_DYING || t->parent == thread_current ())
+    return -1;
+  if (t->ret_status != RET_STATUS_DEFAULT)
+    return t->ret_status;
+  t->parent = thread_current ();/* 把当前线程设为t的父线程 */
+  intr_disable ();
+  thread_block ();/* 将当前线程阻塞 */
+  intr_enable ();
+  ret = t->ret_status;
+  printf ("%s: exit(%d)\n", t->name, t->ret_status);/* 显示线程终止信息 */
+  while (t->status == THREAD_BLOCKED)
+    thread_unblock (t);
+  return ret;
+  //* My Implementation *//
 }
 
 /* Free the current process's resources. */
@@ -98,6 +249,17 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  //* My Implementation *//
+  /* 由于当前线程要退出，重新解阻塞它的父线程 */
+  while (cur->parent && cur->parent->status == THREAD_BLOCKED)
+    thread_unblock (cur->parent);
+  file_close (cur->self);/* 关闭当前线程的执行文件 */
+  cur->self = NULL;
+  intr_disable ();
+  thread_block ();/* 阻塞当前线程 */
+  intr_enable ();
+  //* My Implementation *//
+  
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

@@ -11,5 +11,5 @@
 #define SEL_CNT         6       /* Number of segments. */
 
 void gdt_init (void);
-
+ 
 #endif /* userprog/gdt.h */

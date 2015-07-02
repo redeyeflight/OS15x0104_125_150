@@ -1,9 +1,15 @@
+/* 此文件所有中文注释由陈希文所写 */
+
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+//* My Implementation *//
+#include "threads/vaddr.h"
+#include "userprog/syscall.h"
+//* My Implementation *// 
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -13,7 +19,7 @@ static void page_fault (struct intr_frame *);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
-
+ 
    In a real Unix-like OS, most of these interrupts would be
    passed along to the user process in the form of signals, as
    described in [SV-386] 3-24 and 3-25, but we don't implement
@@ -127,6 +133,7 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
 
+
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
      data.  It is not necessarily the address of the instruction
@@ -148,6 +155,14 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  //* My Implementation *//
+  struct thread *t;
+  t = thread_current ();
+  /* 如果是要访问的页不存在或者用户访问了内核地址，终止当前用户程序 */
+  if (not_present || (is_kernel_vaddr (fault_addr) && user))
+    sys_exit (-1);
+  //* My Implementation *//
+  
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */

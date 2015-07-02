@@ -11,7 +11,7 @@
    their permissions.  There is also a per-process Local
    Descriptor Table (LDT) but that is not used by modern
    operating systems.
-
+ 
    Each entry in the GDT, which is known by its byte offset in
    the table, identifies a segment.  For our purposes only three
    types of segments are of interest: code, data, and TSS or
